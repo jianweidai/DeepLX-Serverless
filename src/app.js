@@ -137,6 +137,29 @@ export function createApp({ corsOrigin = false } = {}) {
     }
   });
 
+  // DeepL 官方 API 兼容接口（Easydict 等客户端：form 表单请求，返回 translations 格式）
+  app.post('/v2/translate', async (c) => {
+    let body = {};
+    try {
+      const ct = c.req.header('content-type') || '';
+      body = ct.includes('application/json') ? await c.req.json() : await c.req.parseBody();
+    } catch { return c.json({ message: 'Bad Request' }, 400); }
+    let { text, source_lang, target_lang } = body;
+    if (Array.isArray(text)) text = text.join('\n');
+    if (typeof text !== 'string' || !text.trim() || typeof target_lang !== 'string') {
+      return c.json({ message: 'Bad Request' }, 400);
+    }
+    try {
+      const result = await translate(text, source_lang || 'auto', target_lang, false);
+      if (result.code === 429) return c.json({ message: 'Too many requests' }, 429);
+      if (!result || !result.data) return c.json({ message: result?.message || 'Translation failed' }, result?.code === 400 ? 400 : 502);
+      return c.json({ translations: [{ detected_source_language: String(result.source_lang || '').toUpperCase(), text: result.data }] });
+    } catch (err) {
+      c.set('err', err);
+      return c.json({ message: 'Upstream error' }, 502);
+    }
+  });
+
   app.notFound((c) => c.json({ code: 404, message: 'Not Found' }, 404));
   app.onError((err, c) => {
     c.set('err', err);
